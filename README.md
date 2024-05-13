@@ -10,23 +10,23 @@ It is inspired by Karpathy's [nanoGPT](https://github.com/karpathy/nanoGPT) wher
 
 The goal of this repository is to give the simplest possible reproduction of the paper. Here are some choices we made to make things simple
 
-- The source code is < 500 lines of code
-- We trained models ranging from 500k~100M parameters
+- The source code is small
+- We trained models ranging from 5M~140M parameters
 - The dataset used is [TinyStories](https://huggingface.co/datasets/roneneldan/TinyStories) (~1Gb of data)
 - During the noising process the noise is added to all the tokens
 - The tokenizer used is the BERT tokenizer (~30k vocab size)
-- No self-conditioning
 - No wierd ODE solvers. Euler is enough
 
 # Results
-Here is the output of a 64 tokens generation of a ~600k parameter model trained on a RTX 3090 for ~3 min 
+Here is the output of a 128 tokens generation of a ~5M parameter model trained for 3 epochs
 
->[CLS] once upon was time, he was a rabbit bell to visit his lid. he knocked, there wanted to run a man of his prohibits. one day, the mommy day, brown look airport other, he. dark, and where'this t to careful molly when she on an book it kept and smiled course [SEP] 
+>[CLS] there was taking a little girl named mary. every had three about many than she was so excited, she opened the garden so everywhere she came to grit new. she could arrived. the top learn saw it train. she loved fun and dance. she turned some playing her how had day moving in the door. she was a frustrated, she would showed the girl " everyone would sarah. " mum replied. jane need to borrow not to draw the. when the little boy saw very different. they got joined in the puddle inside, jane. but possible, if sarah wanted to show about a. liz were cakes and soon quickly and [SEP]
+[CLS] once upon a time there was a house named lina. she was three years old that she needed a she - a small heart. amy put in the perfect and the girl was stuck by a big window. when she saw before to see what nowhere't, but she was delighted. june't came very scared where she was. nobody shouted, " can you very lost and wouldn't do. i want to but sophie was angry. the dog came hard hoping to try a bigravepoo. the girl started to visit that happiness and danced with the story painting. the next day, she carefully gave the beach on her [SEP]
 
-And here is the output of a 128 tokens generation of a ~140k parameter model trained on a H100 for ~1 day, however this can be significantly improved as we didn't bother tuning any hyperparameter
->[CLS] one day, tom called tommy who loved had a house with park. her liked when living cook over the garden fun walking and and small but said out. mommy teach,ggles smiled run weeping was a whileyfixed. as, swimming stuffing flew to sock machine watch fast went good house. but is his moving his offer but each rolled. as smiled my it he and said, it then max said it tom arrived ta sock! the frog was found a noise for in the tree he he tapping a piece piece of anyway and could read he dodge throw and lots around the hole. jen you enjoyed to! the floor and then both [SEP]
+And here is the output of a 128 tokens generation of a ~140M parameter model trained for 3 epochs
 
-**_Note:_** the results can be improved with more compute, data, self-conditioning, better ODE-solvers and so on, but for the sake of this repository this is a win.
+>[CLS] once upon a time there was a little girl. she was very excited because she walked in the hair. as she walked flew out and went. suddenly, she spotted a stick and started behind a swing. she was so excited she kept it. she thought and it felt bo la coloured again! she clapped in her room and clapped brighter. later one day, she tried to worry. she was better to get around and swam around. she started to zoom in it and soon open and of her looking in her pocket. after, so she and it made her bicycle so much louder, but sally had a bit practicing spot in there [SEP]
+[CLS] john was an old and he was excited. he wanted to go the an special. he had a blue spoonometer but he was havinggs. he wished he was excited with happiness. he saw his royal box and found him very idea. he found the proud of times. he had hurt all the children. as his dog start to so home, he got out to find all the spot on the wall. when he got, he saw a monkey, he said he be smiling at his but was something shining so he kept told bob. he had seen a yoga sweater. and smiled and demanded that the whole friends could be him [SEP]
 
 ### Noise scheduling
 For the noise scheduling they use use a linear schedule $\sigma(t)=t$ just as explained in [Elucidating the Design Space of Diffusion-Based Generative Models](https://arxiv.org/pdf/2206.00364.pdf)
@@ -105,12 +105,13 @@ for epoch in range(num_epochs):
             model.noise_schedule.plot_entropy_time_curve()
 ```
 And you should the most recent datapoints along with the last best-fit for the Unormalized Cumulative Density Function $F(t)$
-![et_140M](https://github.com/markov-bio/cdcd/assets/47751420/8d08f943-c1b3-49da-a113-eb65f13e1cac)
+
 It represents the crossentropy loss of the model as a function of the noise $\sigma$ added. The more recent datapoints are colored darker.
 The blue curve represents the fit of $F(t)$ (learnt unormalized CDF).
-
+![et_139 40M](https://github.com/Francesco215/text-diffusion/assets/47751420/3cb6bdd7-bcf8-49d9-b5e3-ddd24367f4bb)
 The other curve that shows up is the one that represents how the best fit for $F(t)$ improves as the training progresses
-![curves_140M](https://github.com/markov-bio/cdcd/assets/47751420/6d87546e-cd87-42a8-b16b-a3cf02da7116)
+![curves_139 40M](https://github.com/Francesco215/text-diffusion/assets/47751420/70f241a4-a6a3-4d11-b190-4d178fe220a7)
+
 The more recent best-fitss are colored darker.
 As the curve shift to the right is idicates that it is learning how to denoise the signal better and better
 
