@@ -4,7 +4,9 @@ This repository aims to reproduce the [Continuous Diffusion from Categorical Dat
 
 It is inspired by Karpathy's [nanoGPT](https://github.com/karpathy/nanoGPT) where he was able to generate coherent text with ~100M parameters.
 
-
+<div align="center">
+    <img width="615" alt="Screenshot 2024-12-09 at 17 45 54" src="https://github.com/user-attachments/assets/fa4a7d38-ebde-41c5-8855-5dd7561eea43">
+</div>
 
 ## The Goal
 
@@ -21,12 +23,14 @@ The goal of this repository is to give the simplest possible reproduction of the
 Here is the output of a 128 tokens generation of a ~5M parameter model trained for 3 epochs
 
 >[CLS] there was taking a little girl named mary. every had three about many than she was so excited, she opened the garden so everywhere she came to grit new. she could arrived. the top learn saw it train. she loved fun and dance. she turned some playing her how had day moving in the door. she was a frustrated, she would showed the girl " everyone would sarah. " mum replied. jane need to borrow not to draw the. when the little boy saw very different. they got joined in the puddle inside, jane. but possible, if sarah wanted to show about a. liz were cakes and soon quickly and [SEP]
-[CLS] once upon a time there was a house named lina. she was three years old that she needed a she - a small heart. amy put in the perfect and the girl was stuck by a big window. when she saw before to see what nowhere't, but she was delighted. june't came very scared where she was. nobody shouted, " can you very lost and wouldn't do. i want to but sophie was angry. the dog came hard hoping to try a bigravepoo. the girl started to visit that happiness and danced with the story painting. the next day, she carefully gave the beach on her [SEP]
+
+>[CLS] once upon a time there was a house named lina. she was three years old that she needed a she - a small heart. amy put in the perfect and the girl was stuck by a big window. when she saw before to see what nowhere't, but she was delighted. june't came very scared where she was. nobody shouted, " can you very lost and wouldn't do. i want to but sophie was angry. the dog came hard hoping to try a bigravepoo. the girl started to visit that happiness and danced with the story painting. the next day, she carefully gave the beach on her [SEP]
 
 And here is the output of a 128 tokens generation of a ~140M parameter model trained for 3 epochs
 
->[CLS] once upon a time there was a little girl. she was very excited because she walked in the hair. as she walked flew out and went. suddenly, she spotted a stick and started behind a swing. she was so excited she kept it. she thought and it felt bo la coloured again! she clapped in her room and clapped brighter. later one day, she tried to worry. she was better to get around and swam around. she started to zoom in it and soon open and of her looking in her pocket. after, so she and it made her bicycle so much louder, but sally had a bit practicing spot in there [SEP]
-[CLS] john was an old and he was excited. he wanted to go the an special. he had a blue spoonometer but he was havinggs. he wished he was excited with happiness. he saw his royal box and found him very idea. he found the proud of times. he had hurt all the children. as his dog start to so home, he got out to find all the spot on the wall. when he got, he saw a monkey, he said he be smiling at his but was something shining so he kept told bob. he had seen a yoga sweater. and smiled and demanded that the whole friends could be him [SEP]
+> [CLS] once upon a time there was a little girl. she was very excited because she walked in the hair. as she walked flew out and went. suddenly, she spotted a stick and started behind a swing. she was so excited she kept it. she thought and it felt bo la coloured again! she clapped in her room and clapped brighter. later one day, she tried to worry. she was better to get around and swam around. she started to zoom in it and soon open and of her looking in her pocket. after, so she and it made her bicycle so much louder, but sally had a bit practicing spot in there [SEP]
+
+> [CLS] john was an old and he was excited. he wanted to go the an special. he had a blue spoonometer but he was havinggs. he wished he was excited with happiness. he saw his royal box and found him very idea. he found the proud of times. he had hurt all the children. as his dog start to so home, he got out to find all the spot on the wall. when he got, he saw a monkey, he said he be smiling at his but was something shining so he kept told bob. he had seen a yoga sweater. and smiled and demanded that the whole friends could be him [SEP]
 
 ### Noise scheduling
 For the noise scheduling they use use a linear schedule $\sigma(t)=t$ just as explained in [Elucidating the Design Space of Diffusion-Based Generative Models](https://arxiv.org/pdf/2206.00364.pdf)
