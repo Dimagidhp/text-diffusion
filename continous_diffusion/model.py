@@ -26,11 +26,15 @@ class DiffusionTransformer(nn.Module):
     def forward(self, noised_embeddings,clean_embeddings,self_cond,m, sigma: Tensor, attn_mask: Tensor = None, masking: Tensor = None) -> Tensor:
 
         # x=torch.cat((noised_embeddings,clean_embeddings,self_cond,m),dim=-1)
-        # define the preconditioning
+        # define the preconditioning following the paper
         c_noise=torch.log(sigma)/4
         c_skip= 1/(1+sigma**2)
         c_in=torch.sqrt(1/(1+sigma**2))
         c_out = sigma/torch.sqrt(1+sigma**2)
+        
+        # Add numerical stability checks for preconditioning
+        c_in = torch.clamp(c_in, min=1e-8)  # Prevent division issues
+        c_out = torch.clamp(c_out, min=-100.0, max=100.0)  # Prevent extreme scaling
         
         noised_embeddings = bmult(noised_embeddings, c_in) # scale only the noised embeddings
         #x = bmult(x,c_in)
@@ -47,6 +51,12 @@ class DiffusionTransformer(nn.Module):
 
         # x = bmult(skip,c_skip) + bmult(x,c_out)
         x=self.hidden_to_logits(x)
+        
+        # Final numerical check
+        if not torch.isfinite(x).all():
+            print(f"Warning: Non-finite values in model output, clamping...")
+            x = torch.clamp(x, min=-50.0, max=50.0)
+        
         return x
 
 def transform_attn_mask(attn_mask):

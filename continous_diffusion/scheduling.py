@@ -41,11 +41,28 @@ class AdaptiveSchedule(nn.Module):
     def update_optimal_parameters(self, history=500):
         times, entropy = self.times[-history:], self.entropy[-history:] 
 
-        offset_lower_bound=-cumulative_density_function(0,self.mu, self.sigma, self.height, 0) #this is an approximation but it gets better and as the training progresses
-        optimal_parameters, _ = curve_fit(cumulative_density_function, times, entropy, (self.mu,self.sigma,self.height, offset_lower_bound+1e-3), bounds=((0,0,0,offset_lower_bound),(np.inf,np.inf,np.inf,np.inf)))
+        # Check for NaN or infinity values in the data
+        times_array = np.array(times)
+        entropy_array = np.array(entropy)
         
-        self.set_parameters(optimal_parameters.tolist())
-        logging.info(f"Updated optimal parameters: mu={self.mu}, sigma={self.sigma}, height={self.height}, offset={self.offset}")    
+        # Filter out NaN/inf values
+        valid_mask = np.isfinite(times_array) & np.isfinite(entropy_array)
+        
+        if not np.any(valid_mask) or np.sum(valid_mask) < 10:
+            logging.warning("Not enough valid data points for curve fitting. Skipping parameter update.")
+            return
+        
+        times_clean = times_array[valid_mask]
+        entropy_clean = entropy_array[valid_mask]
+
+        offset_lower_bound=-cumulative_density_function(0,self.mu, self.sigma, self.height, 0) #this is an approximation but it gets better and as the training progresses
+        
+        try:
+            optimal_parameters, _ = curve_fit(cumulative_density_function, times_clean, entropy_clean, (self.mu,self.sigma,self.height, offset_lower_bound+1e-3), bounds=((0,0,0,offset_lower_bound),(np.inf,np.inf,np.inf,np.inf)))
+            self.set_parameters(optimal_parameters.tolist())
+            logging.info(f"Updated optimal parameters: mu={self.mu}, sigma={self.sigma}, height={self.height}, offset={self.offset}")    
+        except Exception as e:
+            logging.warning(f"Failed to update parameters: {e}. Keeping current parameters.")    
 
     def make_timesteps(self, steps, tmin=None, tmax=None, device='cpu')->Tensor:
         tmin=self.tmin if tmin is None else tmin

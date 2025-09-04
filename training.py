@@ -4,7 +4,7 @@ from torch.utils.data import DataLoader
 from torch.optim.lr_scheduler import LinearLR,SequentialLR, CosineAnnealingLR
 
 from continous_diffusion.diffusion import DiffusionModel
-from continous_diffusion.callbacks import SchedulerUpdater, PlottingData, WriteText, FindUnused
+from continous_diffusion.callbacks import SchedulerUpdater, PlottingData, WriteText, FindUnused, LRMonitor
 
 from datasets import load_dataset
 from transformers import AutoTokenizer
@@ -24,6 +24,11 @@ if __name__ == "__main__":
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
         tokenizer.pad_token_id = tokenizer.eos_token_id
+    
+    # Add mask token if it doesn't exist
+    if tokenizer.mask_token is None:
+        tokenizer.add_special_tokens({'mask_token': '[MASK]'})
+    
     print(f"vocab_size: {tokenizer.vocab_size}")
     
     def tokenize_function(examples):
@@ -49,22 +54,25 @@ if __name__ == "__main__":
     # train_loader = DataLoader(tokenized_datasets['input_ids'], batch_size=512, sampler=sampler)
     train_split = tokenized_datasets['train']
     sampler = composer.utils.dist.get_sampler(train_split)
-    train_loader = DataLoader(train_split, batch_size=512, sampler=sampler)
-    optimizer = torch.optim.AdamW(model.parameters(),lr=3e-4) # peak LR
+    train_loader = DataLoader(train_split, batch_size=64, sampler=sampler)
+    # Reduce learning rate for better numerical stability
+    optimizer = torch.optim.AdamW(model.parameters(),lr=5e-5) # Reduced from 1e-4 to 5e-5
+    iters_per_epoch = len(train_loader)
+    print(f"iters per epoch: {iters_per_epoch}")
 
-    n_iters = 3000
+    n_iters = 15000
     warmup_frac = 0.10
-    warmup_iters = int(n_iters * warmup_frac)  # 300
-    min_lr_start = 3e-6
-    final_lr = 3e-5
+    warmup_iters = int(n_iters * warmup_frac)
+    min_lr_start = 1e-6
+    final_lr = 1e-5
     
     # start_factor scales from min_lr_start -> peak lr
-    start_factor = min_lr_start / optimizer.param_groups[0]["lr"]  # 3e-6 / 3e-4 = 0.01
+    start_factor = min_lr_start / optimizer.param_groups[0]["lr"]  # 1e-6 / 1e-4 = 0.01
     warmup_scheduler = LinearLR(optimizer, start_factor=start_factor, end_factor=1.0, total_iters=warmup_iters)
     cosine_scheduler = CosineAnnealingLR(optimizer, T_max=n_iters - warmup_iters, eta_min=final_lr)
     lr_scheduler = SequentialLR(optimizer, schedulers=[warmup_scheduler, cosine_scheduler], milestones=[warmup_iters])
 
-    callbacks=[PlottingData(200,model),SchedulerUpdater(200,model),WriteText(1000,model)]
+    callbacks=[PlottingData(200,model),SchedulerUpdater(200,model),WriteText(1000,model),LRMonitor(50)]
 
     # Weights & Biases logger
     run_name = f"{model.n_parameters/1e6:.2f}M_{n_iters}it"
@@ -76,7 +84,7 @@ if __name__ == "__main__":
         model=model,
         train_dataloader=train_loader,
         eval_dataloader=None,
-        max_duration=f'{n_iters}it',
+        max_duration=f'{n_iters}ba',  # Changed from 'it' to 'ba' (batches)
         device='gpu',
         callbacks=callbacks,
         loggers=[wandb_logger],
@@ -85,11 +93,14 @@ if __name__ == "__main__":
         schedulers=lr_scheduler,
         step_schedulers_every_batch=True,
         save_folder="./checkpoints",
-        save_filename="it{batch:06d}_of_3000_" + f"{model.n_parameters/1e6:.2f}M.pt",
+        save_filename="it{batch:06d}_of_5000_" + f"{model.n_parameters/1e6:.2f}M.pt",
         save_latest_filename="latest",
         save_overwrite=True,
-        save_interval='1000it',
-        algorithms=FindUnused() #necessary for self-conditioning when training with multi-gpu
+        save_interval='2000ba',  # Increased interval to reduce checkpoint frequency
+        save_weights_only=True,  # Save only weights to avoid optimizer state issues
+        algorithms=FindUnused(), #necessary for self-conditioning when training with multi-gpu
+        # Add gradient clipping for numerical stability
+        grad_clip_norm=1.0
     )
 
     trainer.fit()

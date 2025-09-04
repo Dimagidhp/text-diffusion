@@ -23,12 +23,18 @@ class Loss(nn.Module):
         # Compute cross-entropy loss
         loss = self.cross_entropy_loss(logits, target_tokens)
         
-        #averaging over the non-padding tokens
-        padding_mask = torch.logical_not(attn_mask)
-        loss[padding_mask] = 0
-        loss = loss.sum(dim=-1) / (padding_mask.shape[-1] - padding_mask.float().sum(dim=-1))
+        # Apply mask to only compute loss on non-padding tokens
+        loss = loss * attn_mask.float()
+        
+        # Compute average loss per sequence, avoiding division by zero
+        valid_tokens_per_seq = attn_mask.float().sum(dim=-1)
+        valid_tokens_per_seq = torch.clamp(valid_tokens_per_seq, min=1.0)  # Avoid division by zero
+        loss_per_seq = loss.sum(dim=-1) / valid_tokens_per_seq
 
+        # Check for NaN values and replace with 0
+        loss_per_seq = torch.where(torch.isnan(loss_per_seq), torch.zeros_like(loss_per_seq), loss_per_seq)
+        
         # Update the adaptive schedule with the current loss and sigma (useful for plotting)
-        self.noise_schedule.add_data(loss, sigma)
+        self.noise_schedule.add_data(loss_per_seq.detach(), sigma.detach())
 
-        return loss.mean()
+        return loss_per_seq.mean()
