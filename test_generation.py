@@ -7,11 +7,13 @@ from transformers import AutoTokenizer
 from continous_diffusion import DiffusionModel
 
 # Load the TinyStories dataset
-dataset = load_dataset("roneneldan/TinyStories")
+# dataset = load_dataset("roneneldan/TinyStories")
+# Load the WikiText-103 dataset
+dataset = load_dataset("wikitext", "wikitext-103-raw-v1")
 
-tokenizer = AutoTokenizer.from_pretrained("google-bert/bert-base-uncased")  # or any suitable tokenizer
+tokenizer = AutoTokenizer.from_pretrained("gpt2")  # or any suitable tokenizer
 if tokenizer.pad_token is None:
-    tokenizer.add_special_tokens({'pad_token': '[PAD]'})
+    tokenizer.pad_token = tokenizer.eos_token
 vocab_size=tokenizer.vocab_size+1
 print(f"vocab_size: {tokenizer.vocab_size}")
 # Preprocess the dataset

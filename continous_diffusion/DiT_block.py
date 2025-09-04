@@ -20,8 +20,10 @@ class DiTBlock(nn.Module):
         self.rope=rope
 
         self.make_scale_shift=MakeScaleShift(cond_dim, embed_dim)
-        self.layernorm1=nn.LayerNorm(torch.broadcast_shapes((embed_dim,)))
-        self.layernorm2=nn.LayerNorm(torch.broadcast_shapes((embed_dim,)))
+        # self.layernorm1=nn.LayerNorm(torch.broadcast_shapes((embed_dim,)))
+        # self.layernorm2=nn.LayerNorm(torch.broadcast_shapes((embed_dim,)))
+        self.layernorm1=nn.LayerNorm(embed_dim)
+        self.layernorm2=nn.LayerNorm(embed_dim)
 
         self.feedforward = nn.Sequential(
             nn.Linear(embed_dim, 4 * embed_dim, bias = False),
@@ -76,13 +78,19 @@ class MakeScaleShift(nn.Module):
         assert conditioning.dim() == 2, "all of the cells must have the same conditioning"
         return self.linear(conditioning).chunk(6,dim=-1)
  
-def apply_scale_shift(x, scale, shift:Tensor=None):
+# def apply_scale_shift(x, scale, shift:Tensor=None):
 
-    scale=scale+1
-    x=einops.einsum(x,scale,'b ... c, b c -> b ... c')
+    # scale=scale+1
+    # x=einops.einsum(x,scale,'b ... c, b c -> b ... c')
     
-    if shift is not None: 
-        x=x+shift.unsqueeze(1)
+    # if shift is not None: 
+    #     x=x+shift.unsqueeze(1)
 
-    return F.layer_norm(x, normalized_shape=(x.shape[-1],))
+    # return F.layer_norm(x, normalized_shape=(x.shape[-1],))
 
+def apply_scale_shift(x, scale, shift:Tensor=None):
+    # x: (b, l, c), scale/shift: (b, c)
+    x = x * (scale + 1).unsqueeze(1)
+    if shift is not None:
+        x = x + shift.unsqueeze(1)
+    return x

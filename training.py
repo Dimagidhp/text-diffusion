@@ -1,7 +1,7 @@
 # %%
 import torch
 from torch.utils.data import DataLoader
-from torch.optim.lr_scheduler import LinearLR,SequentialLR,ExponentialLR
+from torch.optim.lr_scheduler import LinearLR,SequentialLR, CosineAnnealingLR
 
 from continous_diffusion.diffusion import DiffusionModel
 from continous_diffusion.callbacks import SchedulerUpdater, PlottingData, WriteText, FindUnused
@@ -13,27 +13,31 @@ import composer
 import os
 
 if __name__ == "__main__":
-    dataset = load_dataset("roneneldan/TinyStories")['train']
+    #dataset = load_dataset("roneneldan/TinyStories")['train']
     # dataset_path = os.path.expanduser("~/.cache/huggingface/datasets/roneneldan___parquet/roneneldan--TinyStories-a62fc98e062666ca")
     # dataset = load_dataset(dataset_path)['train']
+    # Load the WikiText-103 dataset
+    dataset = load_dataset("wikitext", "wikitext-103-raw-v1")
 
-    tokenizer = AutoTokenizer.from_pretrained("google-bert/bert-base-uncased")  # or any suitable tokenizer
+    tokenizer = AutoTokenizer.from_pretrained("gpt2")  # gpt-2 tokenizer
     if tokenizer.pad_token is None:
-        tokenizer.add_special_tokens({'pad_token': '[PAD]'})
+        tokenizer.pad_token = tokenizer.eos_token
+        tokenizer.pad_token_id = tokenizer.eos_token_id
     print(f"vocab_size: {tokenizer.vocab_size}")
     
     def tokenize_function(examples):
-        return tokenizer(examples["text"], padding="max_length", truncation=True, max_length=128)
+        return tokenizer(examples["text"], padding="max_length", truncation=True, max_length=256)
     tokenized_datasets = dataset.map(tokenize_function, batched=True)
     tokenized_datasets.set_format("torch")  
 
     # device="cuda" if torch.cuda.is_available() else "cpu"
     # %%
-    embed_dim, hidden_dim, qkv_dim, num_heads, cond_dim, n_blocks = 64, 1024, 1024, 8, 128, 8 #paper parameters (not sure about qkv_dim)  
+    #embed_dim, hidden_dim, qkv_dim, num_heads, cond_dim, n_blocks = 64, 1024, 1024, 8, 128, 8 #paper parameters (not sure about qkv_dim)  
+    embed_dim, hidden_dim, qkv_dim, num_heads, cond_dim, n_blocks = 256, 1024, 512, 8, 128, 8 
     # embed_dim, hidden_dim, qkv_dim, num_heads, cond_dim, n_blocks = 64, 256, 2048, 16, 128, 20  
     # embed_dim, hidden_dim, qkv_dim, num_heads, cond_dim, n_blocks = 64, 256, 1024, 16, 64, 8 
     # embed_dim, hidden_dim, qkv_dim, num_heads, cond_dim, n_blocks = 64, 128, 512, 8, 64, 2  
-    model=DiffusionModel(embed_dim,hidden_dim,qkv_dim,num_heads,cond_dim,n_blocks,tokenizer,p_self_cond=0.4,p_mask_cond=0.1,p_mask=1,prefix=0)
+    model=DiffusionModel(embed_dim,hidden_dim,qkv_dim,num_heads,cond_dim,n_blocks,tokenizer,p_self_cond=0.4,p_mask_cond=0.1,p_mask=0,prefix=0)
 
     print(f"n parameters:{model.n_parameters/1e6}M")
     # model.load_state_dict(torch.load('checkpoints/ep1_0.961538M'))
@@ -42,17 +46,19 @@ if __name__ == "__main__":
     # %%
     sampler=composer.utils.dist.get_sampler(tokenized_datasets['input_ids'])
     train_loader = DataLoader(tokenized_datasets['input_ids'], batch_size=512, sampler=sampler)
-    optimizer = torch.optim.AdamW(model.parameters(),lr=1e-3)
+    optimizer = torch.optim.AdamW(model.parameters(),lr=3e-4) # peak LR
 
-    n_epochs=3
-    warmup_duration = 0.2
-    decay_duration = 1-warmup_duration
-    n_batches=n_epochs*len(train_loader)
-    gamma = 0.05 ** (1 / (n_batches*decay_duration)) 
-
-    warmup_scheduler = LinearLR(optimizer, start_factor=0.01, end_factor=1.0, total_iters=int(n_batches * warmup_duration))
-    decay_scheduler = ExponentialLR(optimizer, gamma=gamma)
-    lr_scheduler = SequentialLR(optimizer, schedulers=[warmup_scheduler, decay_scheduler], milestones=[int(n_batches * warmup_duration)])
+    n_iters = 3000
+    warmup_frac = 0.10
+    warmup_iters = int(n_iters * warmup_frac)  # 300
+    min_lr_start = 3e-6
+    final_lr = 3e-5
+    
+    # start_factor scales from min_lr_start -> peak lr
+    start_factor = min_lr_start / optimizer.param_groups[0]["lr"]  # 3e-6 / 3e-4 = 0.01
+    warmup_scheduler = LinearLR(optimizer, start_factor=start_factor, end_factor=1.0, total_iters=warmup_iters)
+    cosine_scheduler = CosineAnnealingLR(optimizer, T_max=n_iters - warmup_iters, eta_min=final_lr)
+    lr_scheduler = SequentialLR(optimizer, schedulers=[warmup_scheduler, cosine_scheduler], milestones=[warmup_iters])
 
     callbacks=[PlottingData(200,model),SchedulerUpdater(200,model),WriteText(1000,model)]
 
@@ -62,17 +68,17 @@ if __name__ == "__main__":
         model=model,
         train_dataloader=train_loader,
         eval_dataloader=None,
-        max_duration=f'{n_epochs}ep',
+        max_duration=f'{n_iters}it',
         device='gpu',
         callbacks=callbacks,
         optimizers=optimizer,
         schedulers=lr_scheduler,
         step_schedulers_every_batch=True,
         save_folder="./checkpoints",
-        save_filename="ep{epoch}_"+f"{model.n_parameters/1e6}M",
+        save_filename="it{batch:06d}_of_3000_" + f"{model.n_parameters/1e6:.2f}M.pt",
         save_latest_filename="latest",
         save_overwrite=True,
-        save_interval='1ep',
+        save_interval='1000it',
         algorithms=FindUnused() #necessary for self-conditioning when training with multi-gpu
     )
 

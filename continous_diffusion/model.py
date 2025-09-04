@@ -25,14 +25,16 @@ class DiffusionTransformer(nn.Module):
 
     def forward(self, noised_embeddings,clean_embeddings,self_cond,m, sigma: Tensor, attn_mask: Tensor = None, masking: Tensor = None) -> Tensor:
 
-        x=torch.cat((noised_embeddings,clean_embeddings,self_cond,m),dim=-1)
+        # x=torch.cat((noised_embeddings,clean_embeddings,self_cond,m),dim=-1)
         # define the preconditioning
         c_noise=torch.log(sigma)/4
         c_skip= 1/(1+sigma**2)
         c_in=torch.sqrt(1/(1+sigma**2))
         c_out = sigma/torch.sqrt(1+sigma**2)
         
-        x = bmult(x,c_in)
+        noised_embeddings = bmult(noised_embeddings, c_in) # scale only the noised embeddings
+        #x = bmult(x,c_in)
+        x=torch.cat((noised_embeddings,clean_embeddings,self_cond,m),dim=-1)
         conditioning = self.time_conditioning(c_noise)
 
         attn_mask = transform_attn_mask(attn_mask)

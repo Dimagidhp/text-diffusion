@@ -102,27 +102,71 @@ class Diffusion(ComposerModel):
         
         return self.denoise(noised_embeddings,clean_embeddings,self.noise_schedule.tmax,n_steps)
     
+    # @torch.no_grad()
+    # def denoise(self, noised_embeddings, clean_embeddings, noise_level, n_steps, guidance=1., masking=None):
+    #     device=next(self.parameters()).device
+    #     timesteps=self.noise_schedule.make_timesteps(n_steps,tmax=noise_level,device=device).unsqueeze(1)
+    #     x_i=torch.zeros_like(noised_embeddings) 
+
+        # for i in tqdm(range(n_steps-1)):        
+        #     logits=self.specialized_forward(noised_embeddings,clean_embeddings,timesteps[i],masking,self_cond=x_i)
+        #     cond_logits=self.specialized_forward(noised_embeddings,torch.zeros_like(noised_embeddings),timesteps[i],masking,self_cond=x_i)
+
+        #     # x_i will be used as self-conditioning in the next step
+        #     x_i = guidance*self.embedder.expected_embedding(logits) + (1-guidance)*self.embedder.expected_embedding(cond_logits)
+
+        #     # Euler step of the ODE dx/dt = (x - E[e]) / t
+        #     derivative=(noised_embeddings-x_i)/timesteps[i]
+        #     delta_t=timesteps[i+1]-timesteps[i]
+        #     noised_embeddings = noised_embeddings + derivative * delta_t
+        
+        # return self.specialized_forward(noised_embeddings,clean_embeddings,timesteps[-1],self_cond=x_i) 
+
     @torch.no_grad()
     def denoise(self, noised_embeddings, clean_embeddings, noise_level, n_steps, guidance=1., masking=None):
         device=next(self.parameters()).device
         timesteps=self.noise_schedule.make_timesteps(n_steps,tmax=noise_level,device=device).unsqueeze(1)
         x_i=torch.zeros_like(noised_embeddings) 
 
-        for i in tqdm(range(n_steps-1)):        
-            logits=self.specialized_forward(noised_embeddings,clean_embeddings,timesteps[i],masking,self_cond=x_i)
-            cond_logits=self.specialized_forward(noised_embeddings,torch.zeros_like(noised_embeddings),timesteps[i],masking,self_cond=x_i)
+        for i in tqdm(range(n_steps-1)):
+            t_i, t_ip1 = timesteps[i], timesteps[i+1]
+            dt = t_ip1 - t_i
 
-            # x_i will be used as self-conditioning in the next step
-            x_i = guidance*self.embedder.expected_embedding(logits) + (1-guidance)*self.embedder.expected_embedding(cond_logits)
+            # Heun's method (2nd order)
+            # Predictor at t_i
+            logits = self.specialized_forward(
+                noised_embeddings, clean_embeddings, t_i,
+                attn_mask=None, masking=masking, self_cond=x_i
+            )
+            cond_logits = self.specialized_forward(
+                noised_embeddings, torch.zeros_like(noised_embeddings), t_i,
+                attn_mask=None, masking=masking, self_cond=x_i
+            )
+            e = guidance*self.embedder.expected_embedding(logits) + (1-guidance)*self.embedder.expected_embedding(cond_logits)
+            f_i = (noised_embeddings - e) / t_i
+            x_pred = noised_embeddings + dt * f_i
 
-            derivative=(noised_embeddings-x_i)/timesteps[i]
-            
-            delta_t=timesteps[i+1]-timesteps[i]
-            noised_embeddings = noised_embeddings + derivative * delta_t
+            # Corrector at t_{i+1} (use predictor’s expected embedding as self-cond)
+            logits_p = self.specialized_forward(
+                x_pred, clean_embeddings, t_ip1,
+                attn_mask=None, masking=masking, self_cond=e
+            )
+            cond_logits_p = self.specialized_forward(
+                x_pred, torch.zeros_like(x_pred), t_ip1,
+                attn_mask=None, masking=masking, self_cond=e
+            )
+            e_pred = guidance*self.embedder.expected_embedding(logits_p) + (1-guidance)*self.embedder.expected_embedding(cond_logits_p)
+            f_ip1 = (x_pred - e_pred) / t_ip1
+
+            # Final update
+            noised_embeddings = noised_embeddings + dt * 0.5 * (f_i + f_ip1)
+            x_i = e_pred  # self-conditioning for next step
         
-        return self.specialized_forward(noised_embeddings,clean_embeddings,timesteps[-1],self_cond=x_i) 
-
-    
+        return self.specialized_forward(
+            noised_embeddings, clean_embeddings, timesteps[-1],
+            attn_mask=None, masking=masking, self_cond=x_i
+        )
+        
     def generate_text(self,batch_size,text_lenght,n_steps=1000,file=None):
         logits=self.generate(batch_size,text_lenght,n_steps)
 
@@ -146,7 +190,7 @@ class DiffusionModel(Diffusion):
         num_embeddings=tokenizer.vocab_size
         dit=DiffusionTransformer(embed_dim,num_embeddings,hidden_dim,qkv_dim,num_heads,cond_dim,n_blocks)
         embedder=Embedder(tokenizer,embed_dim)
-        schedule=AdaptiveSchedule(tmin=0.01,tmax=200, mu=3., sigma=2., height=6., offset=-1.)
+        schedule=AdaptiveSchedule(tmin=1.0,tmax=300, mu=3., sigma=2., height=6., offset=-1.)
         loss=Loss(schedule)
         mask_maker=MaskMaker(p_mask,prefix)
         super().__init__(dit, embedder, loss, mask_maker, p_self_cond, p_mask_cond)
