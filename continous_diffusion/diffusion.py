@@ -34,7 +34,7 @@ class Diffusion(ComposerModel):
         self.p_self_cond=p_self_cond
         self.p_mask_cond=p_mask_cond
 
-        self.n_parameters = sum(p.numel() for p in model.parameters() if p.requires_grad)
+        self.n_parameters = sum(p.numel() for p in self.parameters() if p.requires_grad)
 
     def make_sample(self,tokens:Tensor):
         attn_mask=tokens!=self.embedder.pad_token
@@ -42,25 +42,32 @@ class Diffusion(ComposerModel):
         t = self.noise_schedule.sample(shape=(tokens.shape[0],))
         sigma = t.to(tokens.device)  #Index on cpu then send resulting tensor to cuda
         masking=self.mask_maker(tokens.shape,tokens.device)
+        
+        # If nothing is selected (p_mask=0), fall back to training all non-pad tokens
+        if masking.sum() == 0:
+            masking = attn_mask
 
         x =  self.embedder(tokens) * math.sqrt(self.embedder.embed_dim)
         noised_embeddings = masking.unsqueeze(-1) *(x.clone() + bmult(torch.randn_like(x), sigma))
-        clean_embeddings = ~masking.unsqueeze(-1) * x.clone() 
+        #clean_embeddings = ~masking.unsqueeze(-1) * x.clone() 
+        # Unconditional: do not provide clean-conditioning
+        clean_embeddings = torch.zeros_like(x)
 
         self_cond=random.random()<self.p_self_cond
-        if random.random()<self.p_mask_cond:
-            clean_embeddings = torch.zeros_like(clean_embeddings)
-
+        # if random.random()<self.p_mask_cond:
+        #     clean_embeddings = torch.zeros_like(clean_embeddings)
+        
+        # p_mask_cond is ignored in unconditional training
         return noised_embeddings, clean_embeddings, sigma, attn_mask, masking, self_cond
 
     def specialized_forward(self,noised_embeddings,clean_embeddings,sigma,attn_mask=None,masking:Tensor=None,self_cond=False): #think of a better name for this funciton
         m = torch.ones_like(noised_embeddings) if masking is None else masking.float().unsqueeze(-1).expand(noised_embeddings.shape)
 
         #self_cond is either a bool (usually used for training) or a tensor of the pre-computed self-conditioning
+        sc_flag = isinstance(self_cond, bool) and self_cond
         if isinstance(self_cond,bool):
             self_cond=torch.zeros_like(noised_embeddings)
-
-        if self_cond is True:
+        if sc_flag:
             with torch.no_grad():
                 x=self.model(noised_embeddings,clean_embeddings,self_cond,m,sigma,attn_mask,masking)
                 self_cond=self.embedder.expected_embedding(x)
@@ -68,7 +75,8 @@ class Diffusion(ComposerModel):
         return self.model(noised_embeddings,clean_embeddings,self_cond,m,sigma,attn_mask,masking)
 
     def forward(self,batch):
-        noised_embeddings, clean_embeddings, sigma, attn_mask, masking, self_cond= self.make_sample(batch)
+        tokens = batch['input_ids'] if isinstance(batch, dict) else batch
+        noised_embeddings, clean_embeddings, sigma, attn_mask, masking, self_cond = self.make_sample(tokens)
         out=self.specialized_forward(noised_embeddings,clean_embeddings,sigma,attn_mask,masking,self_cond)
         return out,sigma,attn_mask,masking
 
@@ -167,13 +175,13 @@ class Diffusion(ComposerModel):
             attn_mask=None, masking=masking, self_cond=x_i
         )
         
-    def generate_text(self,batch_size,text_lenght,n_steps=1000,file=None):
+    def generate_text(self,batch_size,text_lenght,n_steps=1500,file=None):
         logits=self.generate(batch_size,text_lenght,n_steps)
 
         distrubution=Categorical(logits=logits)
         sample=distrubution.sample()
 
-        generated_text=self.tokenizer.batch_decode(sample)
+        generated_text=self.tokenizer.batch_decode(sample.tolist())
         if file is None:
             print(generated_text)
             return

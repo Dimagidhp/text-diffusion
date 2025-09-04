@@ -57,7 +57,7 @@ class LRMonitor(Callback):
                 lrs = [group['lr'] for group in optimizer.param_groups]
                 name = optimizer.__class__.__name__
                 for idx, lr in enumerate(lrs):
-                    print({f'lr-{name}/group{idx}': lr})
+                    logger.log_metrics({f'lr/{name}_group{idx}': lr}, step=state.timestamp.batch)
 
 
 class FindUnused(Algorithm):

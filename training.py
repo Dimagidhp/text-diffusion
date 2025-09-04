@@ -9,6 +9,7 @@ from continous_diffusion.callbacks import SchedulerUpdater, PlottingData, WriteT
 from datasets import load_dataset
 from transformers import AutoTokenizer
 import composer
+from composer.loggers import WandBLogger
 
 import os
 
@@ -37,15 +38,18 @@ if __name__ == "__main__":
     # embed_dim, hidden_dim, qkv_dim, num_heads, cond_dim, n_blocks = 64, 256, 2048, 16, 128, 20  
     # embed_dim, hidden_dim, qkv_dim, num_heads, cond_dim, n_blocks = 64, 256, 1024, 16, 64, 8 
     # embed_dim, hidden_dim, qkv_dim, num_heads, cond_dim, n_blocks = 64, 128, 512, 8, 64, 2  
-    model=DiffusionModel(embed_dim,hidden_dim,qkv_dim,num_heads,cond_dim,n_blocks,tokenizer,p_self_cond=0.4,p_mask_cond=0.1,p_mask=0,prefix=0)
+    model=DiffusionModel(embed_dim,hidden_dim,qkv_dim,num_heads,cond_dim,n_blocks,tokenizer,p_self_cond=0.4,p_mask_cond=0.0,p_mask=0,prefix=0)
 
     print(f"n parameters:{model.n_parameters/1e6}M")
     # model.load_state_dict(torch.load('checkpoints/ep1_0.961538M'))
     # model=torch.compile(model)
 
     # %%
-    sampler=composer.utils.dist.get_sampler(tokenized_datasets['input_ids'])
-    train_loader = DataLoader(tokenized_datasets['input_ids'], batch_size=512, sampler=sampler)
+    # sampler=composer.utils.dist.get_sampler(tokenized_datasets['input_ids'])
+    # train_loader = DataLoader(tokenized_datasets['input_ids'], batch_size=512, sampler=sampler)
+    train_split = tokenized_datasets['train']
+    sampler = composer.utils.dist.get_sampler(train_split)
+    train_loader = DataLoader(train_split, batch_size=512, sampler=sampler)
     optimizer = torch.optim.AdamW(model.parameters(),lr=3e-4) # peak LR
 
     n_iters = 3000
@@ -62,6 +66,10 @@ if __name__ == "__main__":
 
     callbacks=[PlottingData(200,model),SchedulerUpdater(200,model),WriteText(1000,model)]
 
+    # Weights & Biases logger
+    run_name = f"{model.n_parameters/1e6:.2f}M_{n_iters}it"
+    wandb_logger = WandBLogger(project="text-diffusion-WikiText103", name=run_name, log_artifacts=True)
+
 
     #%%
     trainer=composer.Trainer(
@@ -71,6 +79,8 @@ if __name__ == "__main__":
         max_duration=f'{n_iters}it',
         device='gpu',
         callbacks=callbacks,
+        loggers=[wandb_logger],
+        run_name=run_name,
         optimizers=optimizer,
         schedulers=lr_scheduler,
         step_schedulers_every_batch=True,
