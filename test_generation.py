@@ -11,10 +11,7 @@ from continous_diffusion import DiffusionModel
 # Load the WikiText-103 dataset
 dataset = load_dataset("wikitext", "wikitext-103-raw-v1")
 
-tokenizer = AutoTokenizer.from_pretrained("gpt2")  # or any suitable tokenizer
-if tokenizer.pad_token is None:
-    tokenizer.pad_token = tokenizer.eos_token
-vocab_size=tokenizer.vocab_size+1
+tokenizer = AutoTokenizer.from_pretrained("bert-base-uncased")  # Use BERT tokenizer
 print(f"vocab_size: {tokenizer.vocab_size}")
 # Preprocess the dataset
 def tokenize_function(examples):
@@ -26,14 +23,9 @@ tokenized_datasets.set_format("torch")
 device="cuda" if torch.cuda.is_available() else "cpu"
 
 # %%
-model=DiffusionModel(embed_dim=256,
-                     qkv_dim=4096,
-                     num_heads=8,
-                     cond_dim=64,
-                     n_blocks=32,
-                     vocab_size=vocab_size,
-                     device=device
-                     )
+embed_dim, hidden_dim, qkv_dim, num_heads, cond_dim, n_blocks = 256, 896, 512, 8, 128, 10 
+
+model=DiffusionModel(embed_dim,hidden_dim,qkv_dim,num_heads,cond_dim,n_blocks,tokenizer,p_self_cond=0.6,p_mask_cond=0.0,p_mask=0,prefix=0)
 
 
 # Assuming state_dict is the loaded state dictionary and the prefix to remove is "_orig_mod."
@@ -49,7 +41,7 @@ print(f"n parameters:{model.n_parameters/1e6}M")
 # %%
 out_embeddings=model.generate(1,128,1000,device=device)
 
-from torch.distributions.categorical import Categorical
+from torch.distributions import Categorical
 
 logits=model.un_embedder(out_embeddings)
 

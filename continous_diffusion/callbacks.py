@@ -1,11 +1,10 @@
 import os
 import wandb
+import matplotlib.pyplot as plt
 from composer import Callback, State, Logger, Algorithm
 from IPython.display import clear_output
 from .utils import median
 from .diffusion import Diffusion
-import wandb
-import matplotlib.pyplot as plt
 
 class SchedulerUpdater(Callback):
     def __init__(self,frequency,model:Diffusion):
@@ -14,8 +13,13 @@ class SchedulerUpdater(Callback):
         self.frequency=frequency
 
     def batch_end(self, state: State, logger: Logger):
-        if state.timestamp.batch%self.frequency==0 and state.timestamp.batch!=0:
+        # Convert timestamp to int for proper comparison and logging
+        current_batch = int(state.timestamp.batch)
+        if current_batch % self.frequency == 0 and current_batch != 0:
             self.model.noise_schedule.update_optimal_parameters()
+            
+            # Create directory if it doesn't exist
+            os.makedirs('training_figures', exist_ok=True)
             
             # Generate and save the plot locally
             filename = f'training_figures/et_{(self.model.n_parameters/1e6):.2f}M.png'
@@ -24,16 +28,23 @@ class SchedulerUpdater(Callback):
                 filename=filename
             )
             
-            # Log to WandB
+            # Log to WandB with proper step conversion
             try:
+                # Log the image - use PIL Image or file path
+                import PIL.Image
+                img = PIL.Image.open(filename)
                 logger.log_images({
-                    'plots/cross_entropy_sigma_curve': wandb.Image(filename),
+                    'plots/cross_entropy_sigma_curve': img
+                }, step=current_batch)
+                
+                # Log the metrics
+                logger.log_metrics({
                     'noise_schedule/median': float(self.model.noise_schedule.medians[-1]) if self.model.noise_schedule.medians else 0.0,
                     'noise_schedule/mu': float(self.model.noise_schedule.mu),
                     'noise_schedule/sigma': float(self.model.noise_schedule.sigma),
                     'noise_schedule/height': float(self.model.noise_schedule.height),
                     'noise_schedule/offset': float(self.model.noise_schedule.offset)
-                }, step=state.timestamp.batch)
+                }, step=current_batch)
             except Exception as e:
                 print(f"Warning: Could not log to WandB: {e}")
                 
@@ -47,7 +58,12 @@ class PlottingData(Callback):
         self.frequency=frequency
 
     def batch_start(self, state: State, logger: Logger):
-        if state.timestamp.batch%self.frequency==0 and state.timestamp.batch!=0:
+        # Convert timestamp to int for proper comparison and logging
+        current_batch = int(state.timestamp.batch)
+        if current_batch % self.frequency == 0 and current_batch != 0:
+            # Create directory if it doesn't exist
+            os.makedirs('training_figures', exist_ok=True)
+            
             # Generate and save the plot locally
             filename = f'training_figures/curves_{(self.model.n_parameters/1e6):.2f}M.png'
             self.model.noise_schedule.plot_entropy_time_curve(
@@ -55,17 +71,20 @@ class PlottingData(Callback):
                 title=f'entropy-time, median={self.model.noise_schedule.medians[-1]}'
             )
             
-            # Log to WandB
+            # Log to WandB with proper step conversion
             try:
+                # Log the image - use PIL Image or file path
+                import PIL.Image
+                img = PIL.Image.open(filename)
                 logger.log_images({
-                    'plots/entropy_time_curve': wandb.Image(filename)
-                }, step=state.timestamp.batch)
+                    'plots/entropy_time_curve': img
+                }, step=current_batch)
                 
                 # Also log the number of completed iterations
                 logger.log_metrics({
-                    'training/completed_iterations': int(state.timestamp.batch),
-                    'training/progress_percent': float((state.timestamp.batch / 5000) * 100)
-                }, step=state.timestamp.batch)
+                    'training/completed_iterations': current_batch,
+                    'training/progress_percent': float((current_batch / 15000) * 100)  # Updated for 15000 iterations
+                }, step=current_batch)
             except Exception as e:
                 print(f"Warning: Could not log to WandB: {e}")
 
@@ -77,8 +96,11 @@ class WriteText(Callback):
         self.frequency=frequency
 
     def batch_start(self, state: State, logger: Logger):
-        if state.timestamp.batch%self.frequency==0 and state.timestamp.batch!=0:
-            self.model.generate_text(16,128,file=f'checkpoints/{(self.model.n_parameters/1e6):.2f}M_ep{state.timestamp.epoch}_ba{state.timestamp.batch}.txt')
+        # Convert timestamp to int for proper comparison and file naming
+        current_batch = int(state.timestamp.batch)
+        current_epoch = int(state.timestamp.epoch)
+        if current_batch % self.frequency == 0 and current_batch != 0:
+            self.model.generate_text(16,128,file=f'checkpoints/{(self.model.n_parameters/1e6):.2f}M_ep{current_epoch}_ba{current_batch}.txt')
 
             
 
@@ -88,14 +110,16 @@ class LRMonitor(Callback):
         self.plotting_frequency=plotting_frequency
 
     def batch_end(self, state: State, logger: Logger):
-        if state.timestamp.batch%self.plotting_frequency==0 and state.timestamp.batch!=0:
+        # Convert timestamp to int for proper comparison and logging
+        current_batch = int(state.timestamp.batch)
+        if current_batch % self.plotting_frequency == 0 and current_batch != 0:
             assert state.optimizers is not None, 'optimizers must be defined'
             try:
                 for optimizer in state.optimizers:
                     lrs = [group['lr'] for group in optimizer.param_groups]
                     name = optimizer.__class__.__name__
                     for idx, lr in enumerate(lrs):
-                        logger.log_metrics({f'lr/{name}_group{idx}': float(lr)}, step=state.timestamp.batch)
+                        logger.log_metrics({f'lr/{name}_group{idx}': float(lr)}, step=current_batch)
             except Exception as e:
                 print(f"Warning: Failed to log learning rate: {e}")
 
@@ -107,14 +131,19 @@ class TrainingMonitor(Callback):
         self.frequency = frequency
         
     def batch_end(self, state: State, logger: Logger):
-        if state.timestamp.batch % self.frequency == 0:
-            # Log training progress metrics
+        # Convert timestamp to int for proper comparison and logging
+        current_batch = int(state.timestamp.batch)
+        if current_batch % self.frequency == 0:
+            # Log training progress metrics with proper conversions
             try:
+                current_epoch = int(state.timestamp.epoch)
+                current_sample = int(state.timestamp.sample)
+                
                 logger.log_metrics({
-                    'training/batch': state.timestamp.batch,
-                    'training/epoch': state.timestamp.epoch.value if hasattr(state.timestamp.epoch, 'value') else state.timestamp.epoch,
-                    'training/samples_processed': state.timestamp.sample.value if hasattr(state.timestamp.sample, 'value') else state.timestamp.sample,
-                }, step=state.timestamp.batch)
+                    'training/batch': current_batch,
+                    'training/epoch': current_epoch,
+                    'training/samples_processed': current_sample,
+                }, step=current_batch)
             except Exception as e:
                 print(f"Warning: Could not log training metrics: {e}")
 

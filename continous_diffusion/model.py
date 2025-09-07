@@ -61,7 +61,9 @@ class DiffusionTransformer(nn.Module):
 
 def transform_attn_mask(attn_mask):
     """Transform the attention mask for broadcasting."""
-    if attn_mask==None: return None
+    if attn_mask is None:
+        return None
+    attn_mask = attn_mask.bool()
     ones=torch.full((attn_mask.shape[-1],),True,device=attn_mask.device)
     return einops.einsum(ones,attn_mask, 'l, b m -> b l m').unsqueeze(1)
 

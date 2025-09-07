@@ -36,13 +36,21 @@ class Diffusion(ComposerModel):
 
         self.n_parameters = sum(p.numel() for p in self.parameters() if p.requires_grad)
 
-    def make_sample(self,tokens:Tensor):
-        attn_mask=tokens!=self.embedder.pad_token
+    def make_sample(self,tokens:Tensor, attn_mask:Tensor=None):
+        # Use provided attention mask or compute from pad tokens
+        if attn_mask is None:
+            attn_mask = tokens != self.tokenizer.pad_token_id
+        
+        # Ensure attn_mask is boolean tensor
+        if not isinstance(attn_mask, torch.Tensor):
+            raise TypeError(f"attn_mask must be a tensor, got {type(attn_mask)}")
+        if attn_mask.dtype != torch.bool:
+            attn_mask = attn_mask.bool()
 
         t = self.noise_schedule.sample(shape=(tokens.shape[0],))
         sigma = t.to(tokens.device)  #Index on cpu then send resulting tensor to cuda
         
-        # Keep paper's sigma range but add minimal bounds for numerical stability
+        # Only minimal bounds to prevent extreme outliers
         sigma = torch.clamp(sigma, min=1e-4, max=1000.0)
         
         masking=self.mask_maker(tokens.shape,tokens.device)
@@ -51,8 +59,8 @@ class Diffusion(ComposerModel):
         if masking.sum() == 0:
             masking = attn_mask
 
-        # Follow paper: don't scale embeddings by sqrt(embed_dim)
-        x = self.embedder(tokens)
+        # Keep the embedding scaling that worked for your first 5000 iterations
+        x = self.embedder(tokens) * math.sqrt(self.embedder.embed_dim)
         
         # Use paper's noise injection without clamping the noise itself
         noise = torch.randn_like(x)
@@ -60,10 +68,9 @@ class Diffusion(ComposerModel):
         # Add noise according to paper: x_noisy = x + σ * ε
         noised_embeddings = masking.unsqueeze(-1) * (x.clone() + bmult(noise, sigma))
         
-        # Check for NaN/inf and handle gracefully
+        # Only check for extreme non-finite values (keep everything else as-is)
         if not torch.isfinite(noised_embeddings).all():
             print(f"Warning: Non-finite values in noised_embeddings, sigma range: {sigma.min():.3f}-{sigma.max():.3f}")
-            # Use finite values only
             finite_mask = torch.isfinite(noised_embeddings)
             noised_embeddings = torch.where(finite_mask, noised_embeddings, x.clone())
         
@@ -71,7 +78,7 @@ class Diffusion(ComposerModel):
         # Unconditional: do not provide clean-conditioning
         clean_embeddings = torch.zeros_like(x)
 
-        self_cond=random.random()<self.p_self_cond
+        self_cond=random.random() < self.p_self_cond
         # if random.random()<self.p_mask_cond:
         #     clean_embeddings = torch.zeros_like(clean_embeddings)
         
@@ -112,15 +119,17 @@ class Diffusion(ComposerModel):
 
     def forward(self,batch):
         tokens = batch['input_ids'] if isinstance(batch, dict) else batch
-        noised_embeddings, clean_embeddings, sigma, attn_mask, masking, self_cond = self.make_sample(tokens)
+        attn_mask = batch.get('attention_mask', None) if isinstance(batch, dict) else None
+        noised_embeddings, clean_embeddings, sigma, attn_mask, masking, self_cond = self.make_sample(tokens, attn_mask)
         out=self.specialized_forward(noised_embeddings,clean_embeddings,sigma,attn_mask,masking,self_cond)
         return out,sigma,attn_mask,masking
 
     def loss(self,outputs,batch):
         output_embeddings,sigma,attn_mask,masking=outputs
-        masking=torch.logical_and(attn_mask,masking)
+        # masking=torch.logical_and(attn_mask,masking)
         tokens = batch['input_ids'] if isinstance(batch, dict) else batch
-        return self.Loss(tokens,output_embeddings,sigma,masking) 
+        masking = torch.logical_and(attn_mask, masking)
+        return self.Loss(tokens, output_embeddings, sigma, masking) 
 
     @torch.no_grad()
     def infill(self,tokens,n_steps):
@@ -235,8 +244,8 @@ class DiffusionModel(Diffusion):
         num_embeddings=tokenizer.vocab_size
         dit=DiffusionTransformer(embed_dim,num_embeddings,hidden_dim,qkv_dim,num_heads,cond_dim,n_blocks)
         embedder=Embedder(tokenizer,embed_dim)
-        # Follow the paper: tmin=1, tmax=300 with proper parameters
-        schedule=AdaptiveSchedule(tmin=1.0, tmax=300.0, mu=3., sigma=2., height=6., offset=-1.)
+        # Follow the paper: tmin=0.1, tmax=200 with proper parameters
+        schedule=AdaptiveSchedule(tmin=0.1, tmax=200.0, mu=3., sigma=2., height=6., offset=-1.)
         loss=Loss(schedule)
         mask_maker=MaskMaker(p_mask,prefix)
         super().__init__(dit, embedder, loss, mask_maker, p_self_cond, p_mask_cond)
